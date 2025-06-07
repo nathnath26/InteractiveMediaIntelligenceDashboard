@@ -92,6 +92,95 @@ def generate_campaign_summary_llm(prompt):
         st.error(f"An unexpected error occurred during summary generation: {e}")
         return "Error membuat ringkasan: Terjadi kesalahan tak terduga."
 
+# --- Insight Generation Functions ---
+def get_sentiment_insights(sentiment_data):
+    insights = []
+    if not sentiment_data.empty:
+        total_count = sentiment_data['Count'].sum()
+        dominant_sentiment = sentiment_data.loc[sentiment_data['Count'].idxmax()]
+        
+        insights.append(f"Sentimen dominan adalah **{dominant_sentiment['Sentiment']}** dengan **{dominant_sentiment['Count']}** entri, menunjukkan persepsi yang umumnya {dominant_sentiment['Sentiment'].lower()}.")
+        
+        if len(sentiment_data) > 1:
+            least_dominant_sentiment = sentiment_data.loc[sentiment_data['Count'].idxmin()]
+            insights.append(f"**{least_dominant_sentiment['Sentiment']}** mewakili bagian terkecil dengan **{least_dominant_sentiment['Count']}** entri, menunjukkan lebih sedikit diskusi atau opini yang kurang kuat dalam kategori ini.")
+        
+        insights.append("Distribusi sentimen dapat menunjukkan opini publik yang beragam atau topik yang kompleks.")
+    else:
+        insights.append("Tidak ada data sentimen untuk ditampilkan.")
+    return insights
+
+def get_engagement_trend_insights(engagement_trend_data):
+    insights = []
+    if not engagement_trend_data.empty:
+        peak_date_data = engagement_trend_data.loc[engagement_trend_data['Engagements'].idxmax()]
+        insights.append(f"Keterlibatan mencapai puncaknya sekitar **{peak_date_data['Date'].strftime('%Y-%m-%d')}** dengan **{peak_date_data['Engagements']}** keterlibatan, kemungkinan karena acara atau kampanye tertentu.")
+
+        if len(engagement_trend_data) > 1:
+            first_eng = engagement_trend_data.iloc[0]['Engagements']
+            last_eng = engagement_trend_data.iloc[-1]['Engagements']
+            overall_trend = 'stabil'
+            if last_eng > first_eng * 1.1:
+                overall_trend = 'meningkat'
+            elif last_eng < first_eng * 0.9:
+                overall_trend = 'menurun'
+            insights.append(f"Tren keseluruhan menunjukkan keterlibatan yang **{overall_trend}** selama periode yang dipilih.")
+            
+            if overall_trend == 'menurun':
+                insights.append("Penurunan keterlibatan yang signifikan memerlukan penyelidikan lebih lanjut untuk memahami penyebabnya.")
+            elif overall_trend == 'meningkat':
+                insights.append("Tren yang meningkat menunjukkan strategi konten atau audiens yang efektif.")
+        else:
+            insights.append("Hanya ada satu titik data keterlibatan, tidak cukup untuk analisis tren.")
+    else:
+        insights.append("Tidak ada data tren keterlibatan untuk ditampilkan.")
+    return insights
+
+def get_platform_insights(platform_engagement_data):
+    insights = []
+    if not platform_engagement_data.empty:
+        top_platform_data = platform_engagement_data.iloc[0]
+        insights.append(f"**{top_platform_data['Platform']}** secara konsisten mendorong keterlibatan tertinggi dengan total **{top_platform_data['Engagements']}**, menyoroti pentingnya platform ini untuk menjangkau audiens Anda.")
+        
+        if len(platform_engagement_data) > 1:
+            lowest_platform_data = platform_engagement_data.iloc[-1]
+            insights.append(f"Platform seperti **{lowest_platform_data['Platform']}** menunjukkan keterlibatan yang lebih rendah, menunjukkan potensi pertumbuhan atau kebutuhan akan strategi konten yang berbeda.")
+        
+        insights.append("Diversifikasi konten di seluruh platform sangat penting, karena setiap platform berkontribusi secara unik terhadap total keterlibatan.")
+    else:
+        insights.append("Tidak ada data keterlibatan platform untuk ditampilkan.")
+    return insights
+
+def get_media_type_insights(media_type_data):
+    insights = []
+    if not media_type_data.empty:
+        dominant_media_type = media_type_data.loc[media_type_data['Count'].idxmax()]
+        insights.append(f"**{dominant_media_type['Media Type']}** adalah jenis media yang paling sering digunakan dengan **{dominant_media_type['Count']}** entri, menunjukkan preferensi audiens atau strategi konten yang kuat.")
+        
+        if len(media_type_data) > 1:
+            least_common_media_type = media_type_data.loc[media_type_data['Count'].idxmin()]
+            insights.append(f"**{least_common_media_type['Media Type']}** kurang umum, mungkin karena sifatnya yang khusus atau frekuensi pembuatan konten yang lebih rendah, yang bisa menjadi area untuk eksplorasi.")
+        
+        insights.append("Campuran jenis media dapat meningkatkan jangkauan dan keterlibatan secara keseluruhan dengan melayani preferensi audiens yang berbeda.")
+    else:
+        insights.append("Tidak ada data jenis media untuk ditampilkan.")
+    return insights
+
+def get_location_insights(location_engagement_data):
+    insights = []
+    if not location_engagement_data.empty:
+        top_location_data = location_engagement_data.iloc[-1] # tail(5) then ascending=True means last is top
+        insights.append(f"**{top_location_data['Location']}** adalah area geografis utama untuk keterlibatan dengan total **{top_location_data['Engagements']}** engagements, menunjukkan kehadiran audiens yang kuat di sana.")
+        
+        insights.append(f"Memfokuskan upaya pemasaran pada lokasi dengan keterlibatan tinggi seperti **{top_location_data['Location']}** dapat memaksimalkan dampak.")
+        
+        if len(location_engagement_data) > 1:
+            lowest_of_top_locations = location_engagement_data.iloc[0]
+            insights.append(f"Menjelajahi lokasi dengan keterlibatan yang lebih rendah, seperti {lowest_of_top_locations['Location']} dari 5 teratas, mungkin mengungkapkan peluang untuk ekspansi atau kampanye yang ditargetkan.")
+    else:
+        insights.append("Tidak ada data lokasi untuk ditampilkan.")
+    return insights
+
 
 # --- Main Application Layout ---
 
@@ -303,6 +392,9 @@ with col1:
         )])
         fig_sentiment.update_layout(showlegend=True, height=350, margin=dict(l=20, r=20, t=20, b=20))
         st.plotly_chart(fig_sentiment, use_container_width=True)
+        st.markdown("**Wawasan Utama:**")
+        for insight in get_sentiment_insights(sentiment_data):
+            st.markdown(f"- {insight}")
     else:
         st.warning("Kolom 'Sentiment' tidak ditemukan atau kosong. Analisis sentimen tidak tersedia.")
 
@@ -317,6 +409,9 @@ with col1:
                                 color_discrete_sequence=["#FF6B6B"])
             fig_trend.update_layout(height=350, margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig_trend, use_container_width=True)
+            st.markdown("**Wawasan Utama:**")
+            for insight in get_engagement_trend_insights(engagement_trend_data):
+                st.markdown(f"- {insight}")
         else:
             st.warning("Tidak ada data tren keterlibatan untuk ditampilkan.")
     else:
@@ -337,6 +432,9 @@ with col2:
                                 color_discrete_sequence=COLORS)
             fig_platform.update_layout(height=350, margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig_platform, use_container_width=True)
+            st.markdown("**Wawasan Utama:**")
+            for insight in get_platform_insights(platform_engagement_data):
+                st.markdown(f"- {insight}")
         else:
             st.warning("Tidak ada data keterlibatan platform untuk ditampilkan.")
     else:
@@ -358,6 +456,9 @@ with col2:
             )])
             fig_media_type.update_layout(showlegend=True, height=350, margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig_media_type, use_container_width=True)
+            st.markdown("**Wawasan Utama:**")
+            for insight in get_media_type_insights(media_type_data):
+                st.markdown(f"- {insight}")
         else:
             st.warning("Tidak ada data jenis media untuk ditampilkan.")
     else:
@@ -376,6 +477,9 @@ if 'Location' in df_filtered.columns and 'Engagements' in df_filtered.columns an
                             color_discrete_sequence=COLORS)
         fig_location.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20))
         st.plotly_chart(fig_location, use_container_width=True)
+        st.markdown("**Wawasan Utama:**")
+        for insight in get_location_insights(location_engagement_data):
+            st.markdown(f"- {insight}")
     else:
         st.warning("Tidak ada data lokasi untuk ditampilkan.")
 else:
