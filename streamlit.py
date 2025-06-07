@@ -62,6 +62,11 @@ def generate_campaign_summary_llm(prompt):
     Calls the Gemini API to generate a campaign summary based on the provided prompt.
     """
     api_key = "" # Canvas will provide this in runtime
+
+    if not api_key: # Added check for empty API key
+        st.error("API Key tidak ditemukan. Pastikan API Key diatur dengan benar di lingkungan Canvas.")
+        return "Gagal membuat ringkasan: API Key tidak diatur."
+
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
 
     chat_history = [{"role": "user", "parts": [{"text": prompt}]}]
@@ -80,7 +85,7 @@ def generate_campaign_summary_llm(prompt):
             st.error("Gemini API response structure unexpected.")
             return "Gagal membuat ringkasan. Silakan coba lagi."
     except requests.exceptions.RequestException as e:
-        st.error(f"Error calling Gemini API: {e}. Please ensure you have internet connectivity.")
+        st.error(f"Error calling Gemini API: {e}. Please ensure you have internet connectivity and a valid API key.")
         return "Error membuat ringkasan: Terjadi masalah koneksi atau API."
     except Exception as e:
         st.error(f"An unexpected error occurred during summary generation: {e}")
@@ -379,5 +384,6 @@ st.sidebar.markdown("---")
 st.sidebar.info(
     "💡 Untuk mengekspor dashboard sebagai PDF, gunakan fungsi 'Cetak' bawaan browser Anda (Ctrl+P atau Cmd+P)."
 )
+
 
 
