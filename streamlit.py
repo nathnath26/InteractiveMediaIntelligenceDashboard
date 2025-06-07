@@ -61,7 +61,7 @@ def generate_campaign_summary_llm(prompt):
     """
     Calls the Gemini API to generate a campaign summary based on the provided prompt.
     """
-    api_key = "" # Canvas will provide this in runtime
+    api_key = "AIzaSyC0VUu6xTFIwH3aP2R7tbhyu4O8m1ICxn4" # Canvas will provide this in runtime
 
     if not api_key: # Added check for empty API key
         st.error("API Key tidak ditemukan. Pastikan API Key diatur dengan benar di lingkungan Canvas.")
