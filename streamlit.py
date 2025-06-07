@@ -5,6 +5,9 @@ import io
 import plotly.graph_objects as go
 import plotly.express as px
 
+# Colors for charts (coquette style)
+COLORS = ['#FADADD', '#ADD8E6', '#C7CEEA', '#DDA0DD', '#FFE4E1', '#E6E6FA', '#FFF0F5', '#DEB887']
+
 # Set Streamlit page configuration
 st.set_page_config(layout="wide", page_title="Interactive Media Intelligence Dashboard", page_icon="📊")
 
@@ -376,4 +379,5 @@ st.sidebar.markdown("---")
 st.sidebar.info(
     "💡 Untuk mengekspor dashboard sebagai PDF, gunakan fungsi 'Cetak' bawaan browser Anda (Ctrl+P atau Cmd+P)."
 )
+
 
