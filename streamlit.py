@@ -13,18 +13,21 @@ st.set_page_config(layout="wide", page_title="Interactive Media Intelligence Das
 
 # --- Helper function to parse CSV data ---
 @st.cache_data
-def parse_csv_data(uploaded_file):
+def parse_csv_data(uploaded_file, drop_all_nan_rows=False):
     """
     Parses an uploaded CSV file into a pandas DataFrame, cleans and processes data.
     - Converts 'Date' column to datetime objects.
     - Fills empty 'Engagements' with 0 and converts to integer.
     - Removes rows with invalid dates.
+    - Optionally drops rows with any NaN values.
+    Returns the cleaned DataFrame and the number of rows removed during cleaning.
     """
     if uploaded_file is None:
-        return pd.DataFrame()
+        return pd.DataFrame(), 0
 
     try:
         df = pd.read_csv(uploaded_file)
+        initial_row_count = len(df)
 
         # Define expected columns
         required_columns = ['Date', 'Engagements', 'Sentiment', 'Platform', 'Media Type', 'Location']
@@ -50,11 +53,16 @@ def parse_csv_data(uploaded_file):
         else:
             st.warning("Kolom 'Engagements' tidak ditemukan. Data keterlibatan mungkin tidak akurat.")
             df['Engagements'] = 0 # Default to 0 if missing
-
-        return df
+        
+        # Optional: Drop rows with any NaN values based on user selection
+        if drop_all_nan_rows:
+            df.dropna(inplace=True)
+        
+        rows_removed = initial_row_count - len(df)
+        return df, rows_removed
     except Exception as e:
         st.error(f"Error parsing CSV: {e}. Please ensure the file is a valid CSV and has the expected columns.")
-        return pd.DataFrame()
+        return pd.DataFrame(), 0
 
 # --- Gemini API Call Function ---
 def generate_campaign_summary_llm(prompt):
@@ -234,16 +242,23 @@ uploaded_file = st.file_uploader(
     type="csv"
 )
 
-df_original = parse_csv_data(uploaded_file)
+# --- Sidebar for Filters ---
+st.sidebar.header("Filter Data")
+
+# New: Data Cleaning Option
+st.sidebar.markdown("---")
+st.sidebar.subheader("Pembersihan Data")
+drop_nan_checkbox = st.sidebar.checkbox("Hapus baris dengan nilai yang hilang (NaN)")
+
+
+# Parse and clean data based on the checkbox
+df_original, rows_removed_on_parse = parse_csv_data(uploaded_file, drop_all_nan_rows=drop_nan_checkbox)
 
 if df_original.empty:
     st.info("Unggah file CSV di atas untuk memulai analitik.")
     st.stop() # Stop execution if no data is loaded
 
-st.success(f"File CSV berhasil diunggah dengan {len(df_original)} baris.")
-
-# --- Sidebar for Filters ---
-st.sidebar.header("Filter Data")
+st.success(f"File CSV berhasil diunggah dengan {len(df_original)} baris. ({rows_removed_on_parse} baris dihapus selama pembersihan awal).")
 
 # Populate unique filter values, handling missing columns gracefully
 unique_platforms = ['All'] + sorted(df_original['Platform'].dropna().unique().tolist()) if 'Platform' in df_original.columns else ['All']
