@@ -1,376 +1,108 @@
 import streamlit as st
 import pandas as pd
-import requests
-import io
-import plotly.graph_objects as go
 import plotly.express as px
+import requests
+import json
+from io import StringIO
 
-# Colors for charts (coquette style)
-COLORS = ['#FADADD', '#ADD8E6', '#C7CEEA', '#DDA0DD', '#FFE4E1', '#E6E6FA', '#FFF0F5', '#DEB887']
+# Kunci API untuk Gemini (ganti dengan kunci API Anda yang sebenarnya)
+# Dalam aplikasi nyata, ini harus ditangani dengan aman, mis. rahasia Streamlit
+API_KEY = "AIzaSyC0VUu6xTFIwH3aP2R7tbhyu4O8m1ICxn4"
 
-# Set Streamlit page configuration
-st.set_page_config(layout="wide", page_title="Interactive Media Intelligence Dashboard", page_icon="📊")
+# Konfigurasi halaman
+st.set_page_config(
+    page_title="Dashboard Intelijen Media Interaktif",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- Helper function to parse CSV data ---
+# --- Fungsi Pembantu ---
+
+# Fungsi untuk mengurai data CSV
 @st.cache_data
-def parse_csv_data(uploaded_file, drop_all_nan_rows=False):
-    """
-    Parses an uploaded CSV file into a pandas DataFrame, cleans and processes data.
-    - Converts 'Date' column to datetime objects.
-    - Fills empty 'Engagements' with 0 and converts to integer.
-    - Removes rows with invalid dates.
-    - Optionally drops rows with any NaN values.
-    Returns the cleaned DataFrame and the number of rows removed during cleaning.
-    """
-    if uploaded_file is None:
-        return pd.DataFrame(), 0
+def parse_csv(data):
+    # Gunakan StringIO untuk memperlakukan string sebagai file
+    df = pd.read_csv(StringIO(data))
+    return df
 
-    try:
-        df = pd.read_csv(uploaded_file)
-        initial_row_count = len(df)
+# Pembersihan dan Transformasi Data
+@st.cache_data
+def clean_and_process_data(df, drop_nan=True):
+    initial_row_count = df.shape[0]
 
-        # Define expected columns
-        required_columns = ['Date', 'Engagements', 'Sentiment', 'Platform', 'Media Type', 'Location']
-        
-        # Check if all required columns are present
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            st.warning(f"Kolom berikut tidak ditemukan dalam file CSV: {', '.join(missing_columns)}. "
-                       f"Beberapa filter dan grafik mungkin tidak berfungsi sebagaimana mestinya.")
-            # We will still proceed with available columns but handle missing ones gracefully later.
-
-        # Data cleaning: Convert 'Date' to datetime and 'Engagements' to int
-        # Errors='coerce' will turn unparseable dates into NaT (Not a Time)
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            df.dropna(subset=['Date'], inplace=True) # Drop rows where 'Date' is NaT (invalid date)
-        else:
-            st.warning("Kolom 'Date' tidak ditemukan. Tren keterlibatan tidak akan tersedia.")
-            df['Date'] = pd.NaT # Set to NaT if missing to avoid errors in date filtering
-
-        if 'Engagements' in df.columns:
-            df['Engagements'] = pd.to_numeric(df['Engagements'], errors='coerce').fillna(0).astype(int)
-        else:
-            st.warning("Kolom 'Engagements' tidak ditemukan. Data keterlibatan mungkin tidak akurat.")
-            df['Engagements'] = 0 # Default to 0 if missing
-        
-        # Optional: Drop rows with any NaN values based on user selection
-        if drop_all_nan_rows:
-            df.dropna(inplace=True)
-        
-        rows_removed = initial_row_count - len(df)
-        return df, rows_removed
-    except Exception as e:
-        st.error(f"Error parsing CSV: {e}. Please ensure the file is a valid CSV and has the expected columns.")
-        return pd.DataFrame(), 0
-
-# --- Gemini API Call Function ---
-def generate_campaign_summary_llm(prompt):
-    """
-    Calls the Gemini API to generate a campaign summary based on the provided prompt.
-    """
-    # YOUR API KEY IS NOW HARDCODED HERE
-    api_key = "AIzaSyC0VUu6xTFIwH3aP2R7tbhyu4O8m1ICxn4" 
-
-    if not api_key: # Added check for empty API key
-        st.error("API Key tidak ditemukan. Pastikan API Key diatur dengan benar di lingkungan Canvas.")
-        return "Gagal membuat ringkasan: API Key tidak diatur."
-
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-
-    chat_history = [{"role": "user", "parts": [{"text": prompt}]}]
-    payload = {"contents": chat_history}
-
-    try:
-        response = requests.post(api_url, headers={'Content-Type': 'application/json'}, json=payload)
-        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-        result = response.json()
-
-        if result.get('candidates') and len(result['candidates']) > 0 and \
-           result['candidates'][0].get('content') and result['candidates'][0]['content'].get('parts') and \
-           len(result['candidates'][0]['content']['parts']) > 0:
-            return result['candidates'][0]['content']['parts'][0]['text']
-        else:
-            st.error("Gemini API response structure unexpected.")
-            return "Gagal membuat ringkasan. Silakan coba lagi."
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error calling Gemini API: {e}. Please ensure you have internet connectivity and a valid API key.")
-        return "Error membuat ringkasan: Terjadi masalah koneksi atau API."
-    except Exception as e:
-        st.error(f"An unexpected error occurred during summary generation: {e}")
-        return "Error membuat ringkasan: Terjadi kesalahan tak terduga."
-
-# --- Insight Generation Functions ---
-def get_sentiment_insights(sentiment_data):
-    insights = []
-    if not sentiment_data.empty:
-        total_count = sentiment_data['Count'].sum()
-        dominant_sentiment = sentiment_data.loc[sentiment_data['Count'].idxmax()]
-        
-        insights.append(f"Sentimen dominan adalah **{dominant_sentiment['Sentiment']}** dengan **{dominant_sentiment['Count']}** entri, menunjukkan persepsi yang umumnya {dominant_sentiment['Sentiment'].lower()}.")
-        
-        if len(sentiment_data) > 1:
-            least_dominant_sentiment = sentiment_data.loc[sentiment_data['Count'].idxmin()]
-            insights.append(f"**{least_dominant_sentiment['Sentiment']}** mewakili bagian terkecil dengan **{least_dominant_sentiment['Count']}** entri, menunjukkan lebih sedikit diskusi atau opini yang kurang kuat dalam kategori ini.")
-        
-        insights.append("Distribusi sentimen dapat menunjukkan opini publik yang beragam atau topik yang kompleks.")
+    # Konversi kolom 'Date' ke datetime, paksa kesalahan menjadi NaT (Not a Time)
+    if 'Date' in df.columns:
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        # Filter baris di mana Date adalah NaT
+        df = df.dropna(subset=['Date'])
     else:
-        insights.append("Tidak ada data sentimen untuk ditampilkan.")
-    return insights
+        st.warning("Kolom 'Date' tidak ditemukan. Beberapa fitur mungkin tidak berfungsi dengan baik.")
 
-def get_engagement_trend_insights(engagement_trend_data):
-    insights = []
-    if not engagement_trend_data.empty:
-        peak_date_data = engagement_trend_data.loc[engagement_trend_data['Engagements'].idxmax()]
-        insights.append(f"Keterlibatan mencapai puncaknya sekitar **{peak_date_data['Date'].strftime('%Y-%m-%d')}** dengan **{peak_date_data['Engagements']}** keterlibatan, kemungkinan karena acara atau kampanye tertentu.")
+    # Konversi 'Engagements' ke numerik, paksa kesalahan menjadi NaN
+    if 'Engagements' in df.columns:
+        df['Engagements'] = pd.to_numeric(df['Engagements'], errors='coerce').fillna(0).astype(int)
+    else:
+        st.warning("Kolom 'Engagements' tidak ditemukan. Metrik keterlibatan tidak akan tersedia.")
+        df['Engagements'] = 0 # Tambahkan default jika tidak ada
 
+    # Hapus baris dengan nilai NaN apa pun jika drop_nan benar
+    if drop_nan:
+        df_cleaned = df.dropna()
+    else:
+        df_cleaned = df
+
+    rows_removed = initial_row_count - df_cleaned.shape[0]
+    return df_cleaned, rows_removed
+
+# Fungsi untuk mengonversi tebal seperti Markdown (**teks**) menjadi kuat HTML (<strong>teks</strong>)
+def format_markdown_bold(text):
+    # Menggunakan regex untuk menemukan **teks** dan menggantinya dengan <strong>teks</strong>
+    return text.replace('**', '<strong>', 1).replace('**', '</strong>', 1)
+
+# --- Integrasi LLM untuk Ringkasan Kampanye ---
+def generate_summary(filtered_data, persona):
+    if filtered_data.empty:
+        return "Tidak ada data yang difilter untuk membuat ringkasan."
+
+    # Siapkan data agregat untuk prompt LLM
+    sentiment_counts = filtered_data['Sentiment'].value_counts().to_dict() if 'Sentiment' in filtered_data.columns else {}
+    dominant_sentiment = max(sentiment_counts, key=sentiment_counts.get) if sentiment_counts else 'N/A'
+
+    platform_engagements = filtered_data.groupby('Platform')['Engagements'].sum().sort_values(ascending=False).to_dict() if 'Platform' in filtered_data.columns and 'Engagements' in filtered_data.columns else {}
+    top_platform = next(iter(platform_engagements)) if platform_engagements else 'N/A'
+    top_platform_engagements = platform_engagements.get(top_platform, 0)
+
+    overall_trend = 'stabil'
+    if 'Date' in filtered_data.columns and 'Engagements' in filtered_data.columns:
+        engagement_trend_data = filtered_data.groupby(filtered_data['Date'].dt.date)['Engagements'].sum().sort_index()
         if len(engagement_trend_data) > 1:
-            first_eng = engagement_trend_data.iloc[0]['Engagements']
-            last_eng = engagement_trend_data.iloc[-1]['Engagements']
-            overall_trend = 'stabil'
-            if last_eng > first_eng * 1.1:
+            first_engagement = engagement_trend_data.iloc[0]
+            last_engagement = engagement_trend_data.iloc[-1]
+            if last_engagement > first_engagement * 1.1:
                 overall_trend = 'meningkat'
-            elif last_eng < first_eng * 0.9:
+            elif last_engagement < first_engagement * 0.9:
                 overall_trend = 'menurun'
-            insights.append(f"Tren keseluruhan menunjukkan keterlibatan yang **{overall_trend}** selama periode yang dipilih.")
-            
-            if overall_trend == 'menurun':
-                insights.append("Penurunan keterlibatan yang signifikan memerlukan penyelidikan lebih lanjut untuk memahami penyebabnya.")
-            elif overall_trend == 'meningkat':
-                insights.append("Tren yang meningkat menunjukkan strategi konten atau audiens yang efektif.")
-        else:
-            insights.append("Hanya ada satu titik data keterlibatan, tidak cukup untuk analisis tren.")
+        start_date_llm = engagement_trend_data.index.min().strftime('%Y-%m-%d') if not engagement_trend_data.empty else 'N/A'
+        end_date_llm = engagement_trend_data.index.max().strftime('%Y-%m-%d') if not engagement_trend_data.empty else 'N/A'
     else:
-        insights.append("Tidak ada data tren keterlibatan untuk ditampilkan.")
-    return insights
-
-def get_platform_insights(platform_engagement_data):
-    insights = []
-    if not platform_engagement_data.empty:
-        top_platform_data = platform_engagement_data.iloc[0]
-        insights.append(f"**{top_platform_data['Platform']}** secara konsisten mendorong keterlibatan tertinggi dengan total **{top_platform_data['Engagements']}**, menyoroti pentingnya platform ini untuk menjangkau audiens Anda.")
-        
-        if len(platform_engagement_data) > 1:
-            lowest_platform_data = platform_engagement_data.iloc[-1]
-            insights.append(f"Platform seperti **{lowest_platform_data['Platform']}** menunjukkan keterlibatan yang lebih rendah, menunjukkan potensi pertumbuhan atau kebutuhan akan strategi konten yang berbeda.")
-        
-        insights.append("Diversifikasi konten di seluruh platform sangat penting, karena setiap platform berkontribusi secara unik terhadap total keterlibatan.")
-    else:
-        insights.append("Tidak ada data keterlibatan platform untuk ditampilkan.")
-    return insights
-
-def get_media_type_insights(media_type_data):
-    insights = []
-    if not media_type_data.empty:
-        dominant_media_type = media_type_data.loc[media_type_data['Count'].idxmax()]
-        insights.append(f"**{dominant_media_type['Media Type']}** adalah jenis media yang paling sering digunakan dengan **{dominant_media_type['Count']}** entri, menunjukkan preferensi audiens atau strategi konten yang kuat.")
-        
-        if len(media_type_data) > 1:
-            least_common_media_type = media_type_data.loc[media_type_data['Count'].idxmin()]
-            insights.append(f"**{least_common_media_type['Media Type']}** kurang umum, mungkin karena sifatnya yang khusus atau frekuensi pembuatan konten yang lebih rendah, yang bisa menjadi area untuk eksplorasi.")
-        
-        insights.append("Campuran jenis media dapat meningkatkan jangkauan dan keterlibatan secara keseluruhan dengan melayani preferensi audiens yang berbeda.")
-    else:
-        insights.append("Tidak ada data jenis media untuk ditampilkan.")
-    return insights
-
-def get_location_insights(location_engagement_data):
-    insights = []
-    if not location_engagement_data.empty:
-        top_location_data = location_engagement_data.iloc[-1] # tail(5) then ascending=True means last is top
-        insights.append(f"**{top_location_data['Location']}** adalah area geografis utama untuk keterlibatan dengan total **{top_location_data['Engagements']}** engagements, menunjukkan kehadiran audiens yang kuat di sana.")
-        
-        insights.append(f"Memfokuskan upaya pemasaran pada lokasi dengan keterlibatan tinggi seperti **{top_location_data['Location']}** dapat memaksimalkan dampak.")
-        
-        if len(location_engagement_data) > 1:
-            lowest_of_top_locations = location_engagement_data.iloc[0]
-            insights.append(f"Menjelajahi lokasi dengan keterlibatan yang lebih rendah, seperti {lowest_of_top_locations['Location']} dari 5 teratas, mungkin mengungkapkan peluang untuk ekspansi atau kampanye yang ditargetkan.")
-    else:
-        insights.append("Tidak ada data lokasi untuk ditampilkan.")
-    return insights
-
-
-# --- Main Application Layout ---
-
-st.markdown(
-    """
-    <style>
-    .reportview-container .main .block-container {
-        padding-top: 2rem;
-        padding-right: 2rem;
-        padding-left: 2rem;
-        padding-bottom: 2rem;
-    }
-    .stSelectbox > div > div {
-        border-radius: 0.75rem; /* rounded-lg */
-        border-color: #FADADD; /* pink-200 */
-        background-color: #FFF0F5; /* pink-50 */
-        color: #4A5568; /* gray-800 */
-    }
-    .stDateInput > label > div {
-        border-radius: 0.75rem;
-        border-color: #FADADD;
-        background-color: #FFF0F5;
-        color: #4A5568;
-    }
-    .stButton > button {
-        border-radius: 0.75rem;
-        padding: 0.75rem 1.5rem;
-        font-weight: bold;
-        transition: transform 0.2s;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    /* Coquette style buttons for the app */
-    .stButton > button:hover {
-        transform: scale(1.05);
-    }
-    .stButton > button:active {
-        transform: scale(0.95);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-st.title("💖 Interactive Media Intelligence Dashboard 💖")
-
-# --- File Upload Section ---
-st.header("Unggah File CSV Anda")
-uploaded_file = st.file_uploader(
-    "Silakan unggah file CSV yang berisi data intelijen media Anda. "
-    "Pastikan memiliki kolom untuk 'Date', 'Engagements', 'Sentiment', 'Platform', 'Media Type', dan 'Location'.",
-    type="csv"
-)
-
-# --- Sidebar for Filters ---
-st.sidebar.header("Filter Data")
-
-# New: Data Cleaning Option
-st.sidebar.markdown("---")
-st.sidebar.subheader("Pembersihan Data")
-drop_nan_checkbox = st.sidebar.checkbox("Hapus baris dengan nilai yang hilang (NaN)")
-
-
-# Parse and clean data based on the checkbox
-df_original, rows_removed_on_parse = parse_csv_data(uploaded_file, drop_all_nan_rows=drop_nan_checkbox)
-
-if df_original.empty:
-    st.info("Unggah file CSV di atas untuk memulai analitik.")
-    st.stop() # Stop execution if no data is loaded
-
-st.success(f"File CSV berhasil diunggah dengan {len(df_original)} baris. ({rows_removed_on_parse} baris dihapus selama pembersihan awal).")
-
-# Populate unique filter values, handling missing columns gracefully
-unique_platforms = ['All'] + sorted(df_original['Platform'].dropna().unique().tolist()) if 'Platform' in df_original.columns else ['All']
-unique_sentiments = ['All'] + sorted(df_original['Sentiment'].dropna().unique().tolist()) if 'Sentiment' in df_original.columns else ['All']
-unique_media_types = ['All'] + sorted(df_original['Media Type'].dropna().unique().tolist()) if 'Media Type' in df_original.columns else ['All']
-unique_locations = ['All'] + sorted(df_original['Location'].dropna().unique().tolist()) if 'Location' in df_original.columns else ['All']
-
-# Filter selectboxes
-platform_filter = st.sidebar.selectbox("Platform", unique_platforms)
-sentiment_filter = st.sidebar.selectbox("Sentiment", unique_sentiments)
-media_type_filter = st.sidebar.selectbox("Media Type", unique_media_types)
-location_filter = st.sidebar.selectbox("Location", unique_locations)
-
-# Date Range Filter
-st.sidebar.markdown("---")
-st.sidebar.subheader("Filter Rentang Tanggal")
-
-# Handle min_date and max_date if 'Date' column is missing or empty
-min_date = df_original['Date'].min().date() if 'Date' in df_original.columns and not df_original['Date'].empty else None
-max_date = df_original['Date'].max().date() if 'Date' in df_original.columns and not df_original['Date'].empty else None
-
-# Provide default values for date inputs if min_date/max_date are None
-start_date_filter = st.sidebar.date_input(
-    "Tanggal Mulai", 
-    value=min_date if min_date else pd.to_datetime('2023-01-01').date(), 
-    min_value=min_date, 
-    max_value=max_date
-)
-end_date_filter = st.sidebar.date_input(
-    "Tanggal Akhir", 
-    value=max_date if max_date else pd.to_datetime('2023-12-31').date(), 
-    min_value=min_date, 
-    max_value=max_date
-)
-
-
-# --- Apply Filters ---
-df_filtered = df_original.copy()
-
-if platform_filter != 'All' and 'Platform' in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered['Platform'] == platform_filter]
-if sentiment_filter != 'All' and 'Sentiment' in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered['Sentiment'] == sentiment_filter]
-if media_type_filter != 'All' and 'Media Type' in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered['Media Type'] == media_type_filter]
-if location_filter != 'All' and 'Location' in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered['Location'] == location_filter]
-
-# Apply date filters only if 'Date' column exists
-if 'Date' in df_filtered.columns:
-    if start_date_filter:
-        df_filtered = df_filtered[df_filtered['Date'].dt.date >= start_date_filter]
-    if end_date_filter:
-        df_filtered = df_filtered[df_filtered['Date'].dt.date <= end_date_filter]
-
-if df_filtered.empty:
-    st.warning("Tidak ada data yang cocok dengan kriteria filter yang dipilih.")
-    st.stop()
-
-
-# --- Campaign Strategy Summary (LLM Integration) ---
-st.markdown("## ⚡ Ringkasan Strategi Kampanye")
-
-if st.button("Buat Ringkasan Strategi", type="primary"):
-    with st.spinner('Membuat ringkasan...'):
-        # Prepare aggregated data for the LLM prompt, checking for column existence
-        dominant_sentiment = 'N/A'
-        if 'Sentiment' in df_filtered.columns and not df_filtered['Sentiment'].empty:
-            sentiment_counts = df_filtered['Sentiment'].value_counts()
-            dominant_sentiment = sentiment_counts.idxmax() if not sentiment_counts.empty else 'N/A'
-
-        top_platform = 'N/A'
-        top_platform_engagements = 0
-        if 'Platform' in df_filtered.columns and 'Engagements' in df_filtered.columns:
-            platform_engagements = df_filtered.groupby('Platform')['Engagements'].sum().sort_values(ascending=False)
-            top_platform = platform_engagements.index[0] if not platform_engagements.empty else 'N/A'
-            top_platform_engagements = platform_engagements.iloc[0] if not platform_engagements.empty else 0
-
-        # Engagement trend
-        overall_trend = 'stabil'
         start_date_llm = 'N/A'
         end_date_llm = 'N/A'
 
-        if 'Date' in df_filtered.columns and 'Engagements' in df_filtered.columns:
-            engagement_trend_data = df_filtered.groupby(df_filtered['Date'].dt.date)['Engagements'].sum().reset_index()
-            engagement_trend_data.columns = ['date', 'engagements']
-            engagement_trend_data = engagement_trend_data.sort_values('date')
 
-            if len(engagement_trend_data) > 1:
-                first_eng = engagement_trend_data.iloc[0]['engagements']
-                last_eng = engagement_trend_data.iloc[-1]['engagements']
-                if last_eng > first_eng * 1.1:
-                    overall_trend = 'meningkat'
-                elif last_eng < first_eng * 0.9:
-                    overall_trend = 'menurun'
-            
-            start_date_llm = engagement_trend_data['date'].min().strftime('%Y-%m-%d') if not engagement_trend_data.empty else 'N/A'
-            end_date_llm = engagement_trend_data['date'].max().strftime('%Y-%m-%d') if not engagement_trend_data.empty else 'N/A'
+    media_type_counts = filtered_data['Media Type'].value_counts().to_dict() if 'Media Type' in filtered_data.columns else {}
+    dominant_media_type = max(media_type_counts, key=media_type_counts.get) if media_type_counts else 'N/A'
 
-        dominant_media_type = 'N/A'
-        if 'Media Type' in df_filtered.columns and not df_filtered['Media Type'].empty:
-            media_type_counts = df_filtered['Media Type'].value_counts()
-            dominant_media_type = media_type_counts.idxmax() if not media_type_counts.empty else 'N/A'
+    location_engagements = filtered_data.groupby('Location')['Engagements'].sum().sort_values(ascending=False).to_dict() if 'Location' in filtered_data.columns and 'Engagements' in filtered_data.columns else {}
+    top_location = next(iter(location_engagements)) if location_engagements else 'N/A'
+    top_location_engagements = location_engagements.get(top_location, 0)
 
-        top_location = 'N/A'
-        top_location_engagements = 0
-        if 'Location' in df_filtered.columns and 'Engagements' in df_filtered.columns:
-            location_engagements = df_filtered.groupby('Location')['Engagements'].sum().sort_values(ascending=False)
-            top_location = location_engagements.index[0] if not location_engagements.empty else 'N/A'
-            top_location_engagements = location_engagements.iloc[0] if not location_engagements.empty else 0
+    persona_prefix = ""
+    if persona == "consultant":
+        persona_prefix = "Sebagai seorang konsultan ahli yang menyajikan laporan kepada klien penting, berikan ringkasan ini. Fokus pada rekomendasi strategis dan wawasan yang dapat ditindaklanjuti, dengan bahasa yang formal, berorientasi pada hasil, dan profesional.\n\n"
+    else:  # professional (default)
+        persona_prefix = "Sebagai seorang profesional internal, berikan ringkasan ini. Fokus pada tindakan langsung, wawasan operasional, dan bahasa yang ringkas.\n\n"
 
-        prompt = f"""Berdasarkan data intelijen media dan wawasan berikut, berikan ringkasan strategi kampanye yang ringkas (tindakan dan rekomendasi utama).
+    prompt = persona_prefix + f"""Berdasarkan data intelijen media dan wawasan berikut, berikan ringkasan strategi kampanye yang ringkas (tindakan dan rekomendasi utama).
 - Sentimen Dominan: {dominant_sentiment}.
 - Platform Keterlibatan Teratas: {top_platform} dengan {top_platform_engagements} keterlibatan.
 - Tren Keterlibatan Keseluruhan: {overall_trend} dari {start_date_llm} hingga {end_date_llm}.
@@ -378,129 +110,272 @@ if st.button("Buat Ringkasan Strategi", type="primary"):
 - Lokasi Teratas untuk Keterlibatan: {top_location} dengan {top_location_engagements} keterlibatan.
 Sarankan 3-5 rekomendasi yang dapat ditindaklanjuti untuk mengoptimalkan kampanye media. Fokus pada langkah-langkah yang dapat ditindaklanjuti berdasarkan poin data ini."""
 
-        campaign_summary = generate_campaign_summary_llm(prompt)
-        st.session_state.campaign_summary = campaign_summary
+    headers = {'Content-Type': 'application/json'}
+    payload = {'contents': [{'role': 'user', 'parts': [{'text': prompt}]}]}
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
 
-if 'campaign_summary' in st.session_state and st.session_state.campaign_summary:
-    st.markdown(st.session_state.campaign_summary)
-else:
-    st.info("Klik 'Buat Ringkasan Strategi' untuk mendapatkan rekomendasi kampanye berdasarkan data yang difilter.")
+    try:
+        response = requests.post(api_url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status() # Menimbulkan pengecualian untuk kesalahan HTTP
+        result = response.json()
+        if result and 'candidates' in result and len(result['candidates']) > 0 and \
+           'content' in result['candidates'][0] and 'parts' in result['candidates'][0]['content'] and \
+           len(result['candidates'][0]['content']['parts']) > 0:
+            text = result['candidates'][0]['content']['parts'][0]['text']
+            return text
+        else:
+            return 'Gagal membuat ringkasan. Struktur respons Gemini API tidak terduga.'
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error memanggil Gemini API: {e}")
+        return f'Error membuat ringkasan: {e}'
+    except json.JSONDecodeError as e:
+        st.error(f"Error mengurai respons JSON dari Gemini API: {e}")
+        return f'Error mengurai respons Gemini API: {e}'
 
+# --- Tata Letak Dasbor ---
 
-# --- Dashboard Visualizations ---
+st.title("Dashboard Intelijen Media Interaktif")
 
-col1, col2 = st.columns(2)
+# Bagian Unggah File
+uploaded_file = st.file_uploader("Unggah File CSV Anda", type=["csv"],
+                                 help="Pastikan memiliki kolom untuk 'Date', 'Engagements', 'Sentiment', 'Platform', 'Media Type', dan 'Location'.")
 
-with col1:
-    st.markdown("### 📊 Analisis Sentimen")
-    if 'Sentiment' in df_filtered.columns and not df_filtered['Sentiment'].empty:
-        sentiment_data = df_filtered['Sentiment'].value_counts().reset_index()
-        sentiment_data.columns = ['Sentiment', 'Count']
-        fig_sentiment = go.Figure(data=[go.Pie(
-            labels=sentiment_data['Sentiment'],
-            values=sentiment_data['Count'],
-            hole=.3,
-            marker_colors=COLORS,
-            hoverinfo="label+percent",
-            textinfo="percent",
-            insidetextorientation="radial"
-        )])
-        fig_sentiment.update_layout(showlegend=True, height=350, margin=dict(l=20, r=20, t=20, b=20))
-        st.plotly_chart(fig_sentiment, use_container_width=True)
-        st.markdown("**Wawasan Utama:**")
-        for insight in get_sentiment_insights(sentiment_data):
-            st.markdown(f"- {insight}")
+if uploaded_file is not None:
+    # Baca CSV
+    csv_text = uploaded_file.getvalue().decode("utf-8")
+    original_df = parse_csv(csv_text)
+
+    # Opsi Pembersihan Data
+    st.sidebar.header("Pembersihan Data")
+    drop_nan = st.sidebar.checkbox("Hapus baris dengan nilai yang hilang (NaN)", value=True)
+    
+    cleaned_df, rows_removed = clean_and_process_data(original_df.copy(), drop_nan)
+
+    if cleaned_df.empty:
+        st.error("File CSV kosong atau tidak valid setelah pembersihan. Silakan unggah file lain.")
     else:
-        st.warning("Kolom 'Sentiment' tidak ditemukan atau kosong. Analisis sentimen tidak tersedia.")
+        st.success(f"File CSV berhasil diunggah dengan {cleaned_df.shape[0]} baris. ({rows_removed} baris dihapus selama pembersihan awal).")
+        st.sidebar.write(f"File saat ini: {uploaded_file.name}")
 
-    st.markdown("### 📈 Tren Keterlibatan Seiring Waktu")
-    if 'Date' in df_filtered.columns and 'Engagements' in df_filtered.columns and not df_filtered['Date'].empty and not df_filtered['Engagements'].empty:
-        engagement_trend_data = df_filtered.groupby(df_filtered['Date'].dt.date)['Engagements'].sum().reset_index()
-        engagement_trend_data.columns = ['Date', 'Engagements']
-        engagement_trend_data = engagement_trend_data.sort_values('Date')
-        if not engagement_trend_data.empty:
-            fig_trend = px.line(engagement_trend_data, x='Date', y='Engagements',
-                                labels={'Engagements': 'Total Keterlibatan', 'Date': 'Tanggal'},
-                                color_discrete_sequence=["#FF6B6B"])
-            fig_trend.update_layout(height=350, margin=dict(l=20, r=20, t=20, b=20))
+        # --- Bagian Filter (Sidebar) ---
+        st.sidebar.header("Filter Data")
+
+        # Dapatkan nilai unik untuk filter
+        platforms = ['All'] + sorted(cleaned_df['Platform'].unique().tolist()) if 'Platform' in cleaned_df.columns else ['All']
+        sentiments = ['All'] + sorted(cleaned_df['Sentiment'].unique().tolist()) if 'Sentiment' in cleaned_df.columns else ['All']
+        media_types = ['All'] + sorted(cleaned_df['Media Type'].unique().tolist()) if 'Media Type' in cleaned_df.columns else ['All']
+        locations = ['All'] + sorted(cleaned_df['Location'].unique().tolist()) if 'Location' in cleaned_df.columns else ['All']
+
+        selected_platform = st.sidebar.selectbox("Platform", platforms)
+        selected_sentiment = st.sidebar.selectbox("Sentiment", sentiments)
+        selected_media_type = st.sidebar.selectbox("Jenis Media", media_types)
+        selected_location = st.sidebar.selectbox("Lokasi", locations)
+
+        # Filter Rentang Tanggal
+        min_date = cleaned_df['Date'].min() if 'Date' in cleaned_df.columns and not cleaned_df['Date'].empty else None
+        max_date = cleaned_df['Date'].max() if 'Date' in cleaned_df.columns and not cleaned_df['Date'].empty else None
+        
+        # Ensure min_date and max_date are actual date objects for st.date_input
+        if min_date and pd.isna(min_date): min_date = None
+        if max_date and pd.isna(max_date): max_date = None
+
+        col_start_date, col_end_date = st.sidebar.columns(2)
+        with col_start_date:
+            start_date = st.date_input("Tanggal Mulai", value=min_date, min_value=min_date, max_value=max_date) if min_date else None
+        with col_end_date:
+            end_date = st.date_input("Tanggal Akhir", value=max_date, min_value=min_date, max_value=max_date) if max_date else None
+
+        # Terapkan filter
+        filtered_df = cleaned_df.copy()
+        if selected_platform != 'All':
+            filtered_df = filtered_df[filtered_df['Platform'] == selected_platform]
+        if selected_sentiment != 'All':
+            filtered_df = filtered_df[filtered_df['Sentiment'] == selected_sentiment]
+        if selected_media_type != 'All':
+            filtered_df = filtered_df[filtered_df['Media Type'] == selected_media_type]
+        if selected_location != 'All':
+            filtered_df = filtered_df[filtered_df['Location'] == selected_location]
+
+        if 'Date' in filtered_df.columns and start_date and end_date:
+            filtered_df = filtered_df[(filtered_df['Date'] >= pd.to_datetime(start_date)) & (filtered_df['Date'] <= pd.to_datetime(end_date))]
+
+        # --- Konten Dasbor ---
+
+        st.subheader("Ringkasan Strategi Kampanye")
+        summary_persona = st.selectbox("Pilih Perspektif Ringkasan:", ["professional", "consultant"],
+                                       format_func=lambda x: "Sebagai Profesional" if x == "professional" else "Sebagai Konsultan")
+
+        if st.button("Buat Ringkasan Strategi"):
+            with st.spinner("Membuat ringkasan..."):
+                summary_text = generate_summary(filtered_df, summary_persona)
+                # Gunakan st.markdown dengan unsafe_allow_html=True untuk merender tag kuat HTML
+                st.markdown(format_markdown_bold(summary_text), unsafe_allow_html=True)
+        else:
+            st.write("Klik 'Buat Ringkasan Strategi' untuk mendapatkan rekomendasi kampanye berdasarkan data yang difilter.")
+
+        st.markdown("---") # Pemisah
+
+        st.subheader("Analisis Data")
+
+        # Grafik 1: Perincian Sentimen
+        st.markdown("### Analisis Sentimen")
+        if 'Sentiment' in filtered_df.columns and not filtered_df.empty:
+            sentiment_counts = filtered_df['Sentiment'].value_counts().reset_index()
+            sentiment_counts.columns = ['Sentiment', 'Count']
+            fig_sentiment = px.pie(sentiment_counts, values='Count', names='Sentiment',
+                                   title='Distribusi Sentimen', hole=0.3,
+                                   color_discrete_sequence=px.colors.qualitative.Pastel)
+            st.plotly_chart(fig_sentiment, use_container_width=True)
+            
+            # Wawasan
+            insights = []
+            if not sentiment_counts.empty:
+                dominant_sentiment = sentiment_counts.loc[sentiment_counts['Count'].idxmax()]
+                insights.append(f"Sentimen dominan adalah **{dominant_sentiment['Sentiment']}** dengan **{dominant_sentiment['Count']}** entri, menunjukkan persepsi yang umumnya {dominant_sentiment['Sentiment'].lower()}.")
+                if len(sentiment_counts) > 1:
+                    least_sentiment = sentiment_counts.counts = sentiment_counts.loc[sentiment_counts['Count'].idxmin()]
+                    insights.append(f"**{least_sentiment['Sentiment']}** mewakili bagian terkecil dengan **{least_sentiment['Count']}** entri.")
+            st.markdown("#### Wawasan Utama:")
+            for insight in insights:
+                st.markdown(f"- {format_markdown_bold(insight)}", unsafe_allow_html=True)
+            if not insights:
+                st.markdown("- Tidak ada data sentimen untuk ditampilkan.")
+        else:
+            st.markdown("Tidak ada data sentimen untuk ditampilkan.")
+            st.markdown("#### Wawasan Utama:")
+            st.markdown("- Tidak ada data sentimen untuk ditampilkan.")
+        st.markdown("---")
+
+        # Grafik 2: Tren Keterlibatan Seiring Waktu
+        st.markdown("### Tren Keterlibatan Seiring Waktu")
+        if 'Date' in filtered_df.columns and 'Engagements' in filtered_df.columns and not filtered_df.empty:
+            # Memastikan kolom 'Date' adalah datetime dan mengurutkannya
+            df_for_trend = filtered_df.set_index('Date').resample('D')['Engagements'].sum().reset_index()
+            df_for_trend.columns = ['Date', 'Total Engagements']
+            df_for_trend = df_for_trend.sort_values('Date') # Pastikan data diurutkan berdasarkan tanggal
+
+            fig_trend = px.line(df_for_trend, x='Date', y='Total Engagements',
+                                title='Tren Keterlibatan Harian',
+                                line_shape='spline', markers=True)
             st.plotly_chart(fig_trend, use_container_width=True)
-            st.markdown("**Wawasan Utama:**")
-            for insight in get_engagement_trend_insights(engagement_trend_data):
-                st.markdown(f"- {insight}")
+            
+            # Wawasan
+            insights = []
+            if not df_for_trend.empty:
+                peak_engagement = df_for_trend.loc[df_for_trend['Total Engagements'].idxmax()]
+                insights.append(f"Keterlibatan mencapai puncaknya sekitar **{peak_engagement['Date'].strftime('%Y-%m-%d')}** dengan **{peak_engagement['Total Engagements']}** keterlibatan.")
+                
+                if len(df_for_trend) > 1:
+                    first_val = df_for_trend['Total Engagements'].iloc[0]
+                    last_val = df_for_trend['Total Engagements'].iloc[-1]
+                    overall_trend = 'stabil'
+                    if last_val > first_val * 1.1: overall_trend = 'meningkat'
+                    elif last_val < first_val * 0.9: overall_trend = 'menurun'
+                    insights.append(f"Tren keseluruhan menunjukkan keterlibatan yang **{overall_trend}** selama periode yang dipilih.")
+            st.markdown("#### Wawasan Utama:")
+            for insight in insights:
+                st.markdown(f"- {format_markdown_bold(insight)}", unsafe_allow_html=True)
+            if not insights:
+                st.markdown("- Tidak ada data tren keterlibatan untuk ditampilkan.")
         else:
-            st.warning("Tidak ada data tren keterlibatan untuk ditampilkan.")
-    else:
-        st.warning("Kolom 'Date' atau 'Engagements' tidak ditemukan atau kosong. Tren keterlibatan tidak tersedia.")
+            st.markdown("Tidak ada data tren keterlibatan untuk ditampilkan.")
+            st.markdown("#### Wawasan Utama:")
+            st.markdown("- Tidak ada data tren keterlibatan untuk ditampilkan.")
+        st.markdown("---")
 
 
-with col2:
-    st.markdown("### 📱 Keterlibatan per Platform")
-    if 'Platform' in df_filtered.columns and 'Engagements' in df_filtered.columns and not df_filtered['Platform'].empty and not df_filtered['Engagements'].empty:
-        platform_engagement_data = df_filtered.groupby('Platform')['Engagements'].sum().reset_index()
-        platform_engagement_data.columns = ['Platform', 'Engagements']
-        platform_engagement_data = platform_engagement_data.sort_values('Engagements', ascending=False)
-        if not platform_engagement_data.empty:
-            fig_platform = px.bar(platform_engagement_data, x='Engagements', y='Platform',
-                                orientation='h',
-                                labels={'Engagements': 'Total Keterlibatan', 'Platform': 'Platform'},
-                                color='Platform',
-                                color_discrete_sequence=COLORS)
-            fig_platform.update_layout(height=350, margin=dict(l=20, r=20, t=20, b=20))
+        # Grafik 3: Keterlibatan per Platform
+        st.markdown("### Keterlibatan per Platform")
+        if 'Platform' in filtered_df.columns and 'Engagements' in filtered_df.columns and not filtered_df.empty:
+            platform_engagements = filtered_df.groupby('Platform')['Engagements'].sum().reset_index()
+            platform_engagements.columns = ['Platform', 'Total Engagements']
+            platform_engagements = platform_engagements.sort_values('Total Engagements', ascending=True) # Untuk grafik batang horizontal
+            fig_platform = px.bar(platform_engagements, x='Total Engagements', y='Platform',
+                                  title='Total Keterlibatan per Platform', orientation='h',
+                                  color_discrete_sequence=px.colors.qualitative.Set2)
             st.plotly_chart(fig_platform, use_container_width=True)
-            st.markdown("**Wawasan Utama:**")
-            for insight in get_platform_insights(platform_engagement_data):
-                st.markdown(f"- {insight}")
-        else:
-            st.warning("Tidak ada data keterlibatan platform untuk ditampilkan.")
-    else:
-        st.warning("Kolom 'Platform' atau 'Engagements' tidak ditemukan atau kosong. Keterlibatan per platform tidak tersedia.")
 
-    st.markdown("### 📝 Kombinasi Jenis Media")
-    if 'Media Type' in df_filtered.columns and not df_filtered['Media Type'].empty:
-        media_type_data = df_filtered['Media Type'].value_counts().reset_index()
-        media_type_data.columns = ['Media Type', 'Count']
-        if not media_type_data.empty:
-            fig_media_type = go.Figure(data=[go.Pie(
-                labels=media_type_data['Media Type'],
-                values=media_type_data['Count'],
-                hole=.3,
-                marker_colors=COLORS,
-                hoverinfo="label+percent",
-                textinfo="percent",
-                insidetextorientation="radial"
-            )])
-            fig_media_type.update_layout(showlegend=True, height=350, margin=dict(l=20, r=20, t=20, b=20))
+            # Wawasan
+            insights = []
+            if not platform_engagements.empty:
+                top_platform = platform_engagements.loc[platform_engagements['Total Engagements'].idxmax()]
+                insights.append(f"**{top_platform['Platform']}** secara konsisten mendorong keterlibatan tertinggi dengan total **{top_platform['Total Engagements']}**.")
+                if len(platform_engagements) > 1:
+                    lowest_platform = platform_engagements.loc[platform_engagements['Total Engagements'].idxmin()]
+                    insights.append(f"Platform seperti **{lowest_platform['Platform']}** menunjukkan keterlibatan yang lebih rendah.")
+            st.markdown("#### Wawasan Utama:")
+            for insight in insights:
+                st.markdown(f"- {format_markdown_bold(insight)}", unsafe_allow_html=True)
+            if not insights:
+                st.markdown("- Tidak ada data keterlibatan platform untuk ditampilkan.")
+        else:
+            st.markdown("Tidak ada data keterlibatan platform untuk ditampilkan.")
+            st.markdown("#### Wawasan Utama:")
+            st.markdown("- Tidak ada data keterlibatan platform untuk ditampilkan.")
+        st.markdown("---")
+
+        # Grafik 4: Kombinasi Jenis Media
+        st.markdown("### Kombinasi Jenis Media")
+        if 'Media Type' in filtered_df.columns and not filtered_df.empty:
+            media_type_counts = filtered_df['Media Type'].value_counts().reset_index()
+            media_type_counts.columns = ['Media Type', 'Count']
+            fig_media_type = px.pie(media_type_counts, values='Count', names='Media Type',
+                                    title='Distribusi Jenis Media', hole=0.3,
+                                    color_discrete_sequence=px.colors.qualitative.Set3)
             st.plotly_chart(fig_media_type, use_container_width=True)
-            st.markdown("**Wawasan Utama:**")
-            for insight in get_media_type_insights(media_type_data):
-                st.markdown(f"- {insight}")
+
+            # Wawasan
+            insights = []
+            if not media_type_counts.empty:
+                dominant_media_type = media_type_counts.loc[media_type_counts['Count'].idxmax()]
+                insights.append(f"**{dominant_media_type['Media Type']}** adalah jenis media yang paling sering digunakan dengan **{dominant_media_type['Count']}** entri.")
+                if len(media_type_counts) > 1:
+                    least_common_media = media_type_counts.loc[media_type_counts['Count'].idxmin()]
+                    insights.append(f"**{least_common_media['Media Type']}** kurang umum, mungkin menjadi area untuk eksplorasi.")
+            st.markdown("#### Wawasan Utama:")
+            for insight in insights:
+                st.markdown(f"- {format_markdown_bold(insight)}", unsafe_allow_html=True)
+            if not insights:
+                st.markdown("- Tidak ada data jenis media untuk ditampilkan.")
         else:
-            st.warning("Tidak ada data jenis media untuk ditampilkan.")
-    else:
-        st.warning("Kolom 'Media Type' tidak ditemukan atau kosong. Kombinasi jenis media tidak tersedia.")
+            st.markdown("Tidak ada data jenis media untuk ditampilkan.")
+            st.markdown("#### Wawasan Utama:")
+            st.markdown("- Tidak ada data jenis media untuk ditampilkan.")
+        st.markdown("---")
 
-st.markdown("### 📍 5 Lokasi Teratas")
-if 'Location' in df_filtered.columns and 'Engagements' in df_filtered.columns and not df_filtered['Location'].empty and not df_filtered['Engagements'].empty:
-    location_engagement_data = df_filtered.groupby('Location')['Engagements'].sum().reset_index()
-    location_engagement_data.columns = ['Location', 'Engagements']
-    location_engagement_data = location_engagement_data.sort_values('Engagements', ascending=True).tail(5) # Top 5, sorted ascending for horizontal bar chart
-    if not location_engagement_data.empty:
-        fig_location = px.bar(location_engagement_data, x='Engagements', y='Location',
-                            orientation='h',
-                            labels={'Engagements': 'Total Keterlibatan', 'Location': 'Lokasi'},
-                            color='Location',
-                            color_discrete_sequence=COLORS)
-        fig_location.update_layout(height=400, margin=dict(l=20, r=20, t=20, b=20))
-        st.plotly_chart(fig_location, use_container_width=True)
-        st.markdown("**Wawasan Utama:**")
-        for insight in get_location_insights(location_engagement_data):
-            st.markdown(f"- {insight}")
-    else:
-        st.warning("Tidak ada data lokasi untuk ditampilkan.")
+
+        # Grafik 5: 5 Lokasi Teratas
+        st.markdown("### 5 Lokasi Teratas")
+        if 'Location' in filtered_df.columns and 'Engagements' in filtered_df.columns and not filtered_df.empty:
+            location_engagements = filtered_df.groupby('Location')['Engagements'].sum().nlargest(5).reset_index()
+            location_engagements.columns = ['Location', 'Total Engagements']
+            location_engagements = location_engagements.sort_values('Total Engagements', ascending=True) # Untuk grafik batang horizontal
+            fig_location = px.bar(location_engagements, x='Total Engagements', y='Location',
+                                  title='5 Lokasi Teratas berdasarkan Keterlibatan', orientation='h',
+                                  color_discrete_sequence=px.colors.qualitative.D3)
+            st.plotly_chart(fig_location, use_container_width=True)
+            
+            # Wawasan
+            insights = []
+            if not location_engagements.empty:
+                top_location = location_engagements.loc[location_engagements['Total Engagements'].idxmax()]
+                insights.append(f"**{top_location['Location']}** adalah area geografis utama untuk keterlibatan dengan total **{top_location['Total Engagements']}** keterlibatan.")
+            st.markdown("#### Wawasan Utama:")
+            for insight in insights:
+                st.markdown(f"- {format_markdown_bold(insight)}", unsafe_allow_html=True)
+            if not insights:
+                st.markdown("- Tidak ada data lokasi untuk ditampilkan.")
+        else:
+            st.markdown("Tidak ada data lokasi untuk ditampilkan.")
+            st.markdown("#### Wawasan Utama:")
+            st.markdown("- Tidak ada data lokasi untuk ditampilkan.")
+        st.markdown("---")
+
+        st.markdown("""
+            ---
+            **Ekspor ke PDF:** Untuk mengekspor seluruh dashboard ke PDF, silakan gunakan fungsi "Cetak" atau "Simpan sebagai PDF" dari browser Anda (Ctrl+P atau Cmd+P).
+            """)
+
 else:
-    st.warning("Kolom 'Location' atau 'Engagements' tidak ditemukan atau kosong. 5 Lokasi Teratas tidak tersedia.")
+    st.info("Silakan unggah file CSV untuk memulai.")
 
-st.sidebar.markdown("---")
-st.sidebar.info(
-    "💡 Untuk mengekspor dashboard sebagai PDF, gunakan fungsi 'Cetak' bawaan browser Anda (Ctrl+P atau Cmd+P)."
-)
