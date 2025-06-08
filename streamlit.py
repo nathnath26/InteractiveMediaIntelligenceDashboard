@@ -16,6 +16,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Palet warna kustom yang terinspirasi dari gaya HTML Anda
+CUSTOM_PLOTLY_COLORS = [
+    '#ec4899', # pink-400
+    '#a78bfa', # purple-400
+    '#f43f5e', # rose-400
+    '#C7CEEA', # light purple
+    '#FADADD', # light pink
+    '#ADD8E6', # light blue
+    '#DDA0DD', # plum
+    '#FFE4E1', # misty rose
+    '#E6E6FA', # lavender
+    '#DEB887'  # burlywood
+]
+
 # --- Fungsi Pembantu ---
 
 # Fungsi untuk mengurai data CSV
@@ -56,7 +70,6 @@ def clean_and_process_data(df, drop_nan=True):
 
 # Fungsi untuk mengonversi tebal seperti Markdown (**teks**) menjadi kuat HTML (<strong>teks</strong>)
 def format_markdown_bold(text):
-    # Menggunakan regex untuk menemukan **teks** dan menggantinya dengan <strong>teks</strong>
     import re
     return re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
 
@@ -203,8 +216,11 @@ if uploaded_file is not None:
         # --- Konten Dasbor ---
 
         st.subheader("Ringkasan Strategi Kampanye")
-        summary_persona = st.selectbox("Pilih Perspektif Ringkasan:", ["professional", "consultant"],
-                                       format_func=lambda x: "Sebagai Profesional" if x == "professional" else "Sebagai Konsultan")
+        summary_persona = st.selectbox(
+            "Pilih Perspektif Ringkasan:",
+            ["professional", "consultant"],
+            format_func=lambda x: "Generate Gemini AI Analysis" if x == "professional" else "Generate with OpenRouter AI"
+        )
 
         if st.button("Buat Ringkasan Strategi"):
             with st.spinner("Membuat ringkasan..."):
@@ -225,7 +241,7 @@ if uploaded_file is not None:
             sentiment_counts.columns = ['Sentiment', 'Count']
             fig_sentiment = px.pie(sentiment_counts, values='Count', names='Sentiment',
                                    title='Distribusi Sentimen', hole=0.3,
-                                   color_discrete_sequence=px.colors.qualitative.Pastel)
+                                   color_discrete_sequence=CUSTOM_PLOTLY_COLORS) # Menggunakan palet kustom
             st.plotly_chart(fig_sentiment, use_container_width=True)
             
             # Wawasan
@@ -257,7 +273,8 @@ if uploaded_file is not None:
 
             fig_trend = px.line(df_for_trend, x='Date', y='Total Engagements',
                                 title='Tren Keterlibatan Harian',
-                                line_shape='spline', markers=True)
+                                line_shape='spline', markers=True,
+                                color_discrete_sequence=[CUSTOM_PLOTLY_COLORS[0]]) # Menggunakan warna pertama dari palet kustom
             st.plotly_chart(fig_trend, use_container_width=True)
             
             # Wawasan
@@ -293,7 +310,7 @@ if uploaded_file is not None:
             platform_engagements = platform_engagements.sort_values('Total Engagements', ascending=True) # Untuk grafik batang horizontal
             fig_platform = px.bar(platform_engagements, x='Total Engagements', y='Platform',
                                   title='Total Keterlibatan per Platform', orientation='h',
-                                  color_discrete_sequence=px.colors.qualitative.Set2)
+                                  color_discrete_sequence=CUSTOM_PLOTLY_COLORS) # Menggunakan palet kustom
             st.plotly_chart(fig_platform, use_container_width=True)
 
             # Wawasan
@@ -322,7 +339,7 @@ if uploaded_file is not None:
             media_type_counts.columns = ['Media Type', 'Count']
             fig_media_type = px.pie(media_type_counts, values='Count', names='Media Type',
                                     title='Distribusi Jenis Media', hole=0.3,
-                                    color_discrete_sequence=px.colors.qualitative.Set3)
+                                    color_discrete_sequence=CUSTOM_PLOTLY_COLORS) # Menggunakan palet kustom
             st.plotly_chart(fig_media_type, use_container_width=True)
 
             # Wawasan
@@ -353,7 +370,7 @@ if uploaded_file is not None:
             location_engagements = location_engagements.sort_values('Total Engagements', ascending=True) # Untuk grafik batang horizontal
             fig_location = px.bar(location_engagements, x='Total Engagements', y='Location',
                                   title='5 Lokasi Teratas berdasarkan Keterlibatan', orientation='h',
-                                  color_discrete_sequence=px.colors.qualitative.D3)
+                                  color_discrete_sequence=[CUSTOM_PLOTLY_COLORS[0]]) # Menggunakan warna utama dari palet kustom
             st.plotly_chart(fig_location, use_container_width=True)
             
             # Wawasan
