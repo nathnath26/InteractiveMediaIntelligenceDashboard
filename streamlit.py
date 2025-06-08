@@ -57,7 +57,8 @@ def clean_and_process_data(df, drop_nan=True):
 # Fungsi untuk mengonversi tebal seperti Markdown (**teks**) menjadi kuat HTML (<strong>teks</strong>)
 def format_markdown_bold(text):
     # Menggunakan regex untuk menemukan **teks** dan menggantinya dengan <strong>teks</strong>
-    return text.replace('**', '<strong>', 1).replace('**', '</strong>', 1)
+    import re
+    return re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
 
 # --- Integrasi LLM untuk Ringkasan Kampanye ---
 def generate_summary(filtered_data, persona):
@@ -233,7 +234,7 @@ if uploaded_file is not None:
                 dominant_sentiment = sentiment_counts.loc[sentiment_counts['Count'].idxmax()]
                 insights.append(f"Sentimen dominan adalah **{dominant_sentiment['Sentiment']}** dengan **{dominant_sentiment['Count']}** entri, menunjukkan persepsi yang umumnya {dominant_sentiment['Sentiment'].lower()}.")
                 if len(sentiment_counts) > 1:
-                    least_sentiment = sentiment_counts.counts = sentiment_counts.loc[sentiment_counts['Count'].idxmin()]
+                    least_sentiment = sentiment_counts.loc[sentiment_counts['Count'].idxmin()]
                     insights.append(f"**{least_sentiment['Sentiment']}** mewakili bagian terkecil dengan **{least_sentiment['Count']}** entri.")
             st.markdown("#### Wawasan Utama:")
             for insight in insights:
